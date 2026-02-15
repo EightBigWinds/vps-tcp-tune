@@ -21922,23 +21922,67 @@ model_viewer_deploy() {
     mv_port="${mv_port:-$MODEL_VIEWER_DEFAULT_PORT}"
 
     echo ""
-    echo -e "${gl_kjlan}配置各提供商（回车跳过 = 不启用该提供商）${gl_bai}"
-    echo -e "${gl_hui}API 地址默认为官方，如使用反代请替换为你的反代地址${gl_bai}"
+    echo -e "${gl_kjlan}配置各提供商（选 0 跳过 = 不启用）${gl_bai}"
+
+    # Claude
     echo ""
     echo -e "${gl_kjlan}── Claude ──${gl_bai}"
-    read -e -p "API 地址 [https://api.anthropic.com]: " mv_anthropic_url
-    mv_anthropic_url="${mv_anthropic_url:-https://api.anthropic.com}"
-    read -e -p "API Key: " mv_anthropic_key
+    echo "  1. 官方 API (api.anthropic.com)"
+    echo "  2. 反代（自定义地址 + Key）"
+    echo "  0. 跳过"
+    read -e -p "  选择 [0-2]: " claude_mode
+    mv_anthropic_url=""
+    mv_anthropic_key=""
+    case "$claude_mode" in
+        1)
+            mv_anthropic_url="https://api.anthropic.com"
+            read -e -p "  API Key: " mv_anthropic_key
+            ;;
+        2)
+            read -e -p "  反代地址 (如 https://sub2api.vox.moe): " mv_anthropic_url
+            read -e -p "  API Key: " mv_anthropic_key
+            ;;
+    esac
+
+    # OpenAI
     echo ""
     echo -e "${gl_kjlan}── OpenAI / GPT ──${gl_bai}"
-    read -e -p "API 地址 [https://api.openai.com]: " mv_openai_url
-    mv_openai_url="${mv_openai_url:-https://api.openai.com}"
-    read -e -p "API Key: " mv_openai_key
+    echo "  1. 官方 API (api.openai.com)"
+    echo "  2. 反代（自定义地址 + Key）"
+    echo "  0. 跳过"
+    read -e -p "  选择 [0-2]: " openai_mode
+    mv_openai_url=""
+    mv_openai_key=""
+    case "$openai_mode" in
+        1)
+            mv_openai_url="https://api.openai.com"
+            read -e -p "  API Key: " mv_openai_key
+            ;;
+        2)
+            read -e -p "  反代地址 (如 https://sub2api.vox.moe): " mv_openai_url
+            read -e -p "  API Key: " mv_openai_key
+            ;;
+    esac
+
+    # Gemini
     echo ""
     echo -e "${gl_kjlan}── Google Gemini ──${gl_bai}"
-    read -e -p "API 地址 [https://generativelanguage.googleapis.com]: " mv_google_url
-    mv_google_url="${mv_google_url:-https://generativelanguage.googleapis.com}"
-    read -e -p "API Key: " mv_google_key
+    echo "  1. 官方 API (generativelanguage.googleapis.com)"
+    echo "  2. 反代（自定义地址 + Key）"
+    echo "  0. 跳过"
+    read -e -p "  选择 [0-2]: " gemini_mode
+    mv_google_url=""
+    mv_google_key=""
+    case "$gemini_mode" in
+        1)
+            mv_google_url="https://generativelanguage.googleapis.com"
+            read -e -p "  API Key: " mv_google_key
+            ;;
+        2)
+            read -e -p "  反代地址 (如 https://sub2api.vox.moe): " mv_google_url
+            read -e -p "  API Key: " mv_google_key
+            ;;
+    esac
 
     # 创建目录
     mkdir -p "$MODEL_VIEWER_INSTALL_DIR"
@@ -22330,59 +22374,75 @@ model_viewer_config() {
     echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
     echo ""
 
+    local cur_au="" cur_ou="" cur_gu="" cur_ak="" cur_ok="" cur_gk="" cur_ttl="300"
     if [ -f "$MODEL_VIEWER_CONFIG" ]; then
+        cur_au=$(grep -o '"anthropic_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
+        cur_ou=$(grep -o '"openai_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
+        cur_gu=$(grep -o '"google_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
+        cur_ak=$(grep -o '"anthropic_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
+        cur_ok=$(grep -o '"openai_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
+        cur_gk=$(grep -o '"google_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
+        cur_ttl=$(grep -o '"cache_ttl_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$MODEL_VIEWER_CONFIG" | grep -o '[0-9]*$')
+        cur_ttl="${cur_ttl:-300}"
+
         echo -e "${gl_kjlan}当前配置:${gl_bai}"
         echo -e "  端口: $(model_viewer_get_port)"
-        local au ou gu ak ok gk
-        au=$(grep -o '"anthropic_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
-        ou=$(grep -o '"openai_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
-        gu=$(grep -o '"google_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
-        ak=$(grep -o '"anthropic_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
-        ok=$(grep -o '"openai_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
-        gk=$(grep -o '"google_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')
-        echo -e "  Claude:  ${gl_zi}${au:-未配置}${gl_bai}  Key=${ak:+已配置}${ak:-未配置}"
-        echo -e "  OpenAI:  ${gl_zi}${ou:-未配置}${gl_bai}  Key=${ok:+已配置}${ok:-未配置}"
-        echo -e "  Gemini:  ${gl_zi}${gu:-未配置}${gl_bai}  Key=${gk:+已配置}${gk:-未配置}"
+        if [ -n "$cur_au" ] && [ -n "$cur_ak" ]; then
+            echo -e "  Claude:  ${gl_zi}${cur_au}${gl_bai} (Key 已配置)"
+        else
+            echo -e "  Claude:  ${gl_huang}未配置${gl_bai}"
+        fi
+        if [ -n "$cur_ou" ] && [ -n "$cur_ok" ]; then
+            echo -e "  OpenAI:  ${gl_zi}${cur_ou}${gl_bai} (Key 已配置)"
+        else
+            echo -e "  OpenAI:  ${gl_huang}未配置${gl_bai}"
+        fi
+        if [ -n "$cur_gu" ] && [ -n "$cur_gk" ]; then
+            echo -e "  Gemini:  ${gl_zi}${cur_gu}${gl_bai} (Key 已配置)"
+        else
+            echo -e "  Gemini:  ${gl_huang}未配置${gl_bai}"
+        fi
         echo ""
     fi
 
-    echo -e "${gl_hui}直接回车保持不变${gl_bai}"
-    echo ""
     read -e -p "监听端口 [$(model_viewer_get_port)]: " new_port
+    local final_port="${new_port:-$(model_viewer_get_port)}"
+
+    # Claude
+    local final_au="$cur_au" final_ak="$cur_ak"
     echo ""
     echo -e "${gl_kjlan}── Claude ──${gl_bai}"
-    read -e -p "API 地址: " new_au
-    read -e -p "API Key: " new_ak
+    echo "  1. 官方 API  2. 反代  3. 清除(停用)  0. 保持不变"
+    read -e -p "  选择 [0-3]: " cm
+    case "$cm" in
+        1) final_au="https://api.anthropic.com"; read -e -p "  API Key: " final_ak ;;
+        2) read -e -p "  反代地址: " final_au; read -e -p "  API Key: " final_ak ;;
+        3) final_au=""; final_ak="" ;;
+    esac
+
+    # OpenAI
+    local final_ou="$cur_ou" final_ok="$cur_ok"
     echo ""
     echo -e "${gl_kjlan}── OpenAI / GPT ──${gl_bai}"
-    read -e -p "API 地址: " new_ou
-    read -e -p "API Key: " new_ok
+    echo "  1. 官方 API  2. 反代  3. 清除(停用)  0. 保持不变"
+    read -e -p "  选择 [0-3]: " om
+    case "$om" in
+        1) final_ou="https://api.openai.com"; read -e -p "  API Key: " final_ok ;;
+        2) read -e -p "  反代地址: " final_ou; read -e -p "  API Key: " final_ok ;;
+        3) final_ou=""; final_ok="" ;;
+    esac
+
+    # Gemini
+    local final_gu="$cur_gu" final_gk="$cur_gk"
     echo ""
     echo -e "${gl_kjlan}── Google Gemini ──${gl_bai}"
-    read -e -p "API 地址: " new_gu
-    read -e -p "API Key: " new_gk
-
-    local final_port final_au final_ou final_gu final_ak final_ok final_gk final_ttl
-    if [ -f "$MODEL_VIEWER_CONFIG" ]; then
-        final_port="${new_port:-$(model_viewer_get_port)}"
-        final_au="${new_au:-$(grep -o '"anthropic_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')}"
-        final_ou="${new_ou:-$(grep -o '"openai_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')}"
-        final_gu="${new_gu:-$(grep -o '"google_base_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')}"
-        final_ak="${new_ak:-$(grep -o '"anthropic_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')}"
-        final_ok="${new_ok:-$(grep -o '"openai_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')}"
-        final_gk="${new_gk:-$(grep -o '"google_api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$MODEL_VIEWER_CONFIG" | sed 's/.*: *"//' | sed 's/"$//')}"
-        final_ttl=$(grep -o '"cache_ttl_seconds"[[:space:]]*:[[:space:]]*[0-9]*' "$MODEL_VIEWER_CONFIG" | grep -o '[0-9]*$')
-    else
-        final_port="${new_port:-$MODEL_VIEWER_DEFAULT_PORT}"
-        final_au="$new_au"
-        final_ou="$new_ou"
-        final_gu="$new_gu"
-        final_ak="$new_ak"
-        final_ok="$new_ok"
-        final_gk="$new_gk"
-        final_ttl=300
-    fi
-    final_ttl="${final_ttl:-300}"
+    echo "  1. 官方 API  2. 反代  3. 清除(停用)  0. 保持不变"
+    read -e -p "  选择 [0-3]: " gm
+    case "$gm" in
+        1) final_gu="https://generativelanguage.googleapis.com"; read -e -p "  API Key: " final_gk ;;
+        2) read -e -p "  反代地址: " final_gu; read -e -p "  API Key: " final_gk ;;
+        3) final_gu=""; final_gk="" ;;
+    esac
 
     cat > "$MODEL_VIEWER_CONFIG" << CONFIGEOF
 {
@@ -22393,7 +22453,7 @@ model_viewer_config() {
     "openai_api_key": "${final_ok}",
     "google_base_url": "${final_gu}",
     "google_api_key": "${final_gk}",
-    "cache_ttl_seconds": ${final_ttl}
+    "cache_ttl_seconds": ${cur_ttl}
 }
 CONFIGEOF
 
