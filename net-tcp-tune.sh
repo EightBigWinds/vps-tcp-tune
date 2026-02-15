@@ -22046,6 +22046,64 @@ function httpGet(url, headers) {
     });
 }
 
+function modelRank(provider, id) {
+    const s = (id || '').toLowerCase();
+    if (provider === 'claude') {
+        let ver = 0;
+        const m1 = s.match(/claude-(?:opus|sonnet|haiku)-(\d+)-(\d+)/);
+        const m2 = s.match(/claude-(\d+)-(\d+)-(?:opus|sonnet|haiku)/);
+        const m3 = s.match(/claude-(\d+)-(?:opus|sonnet|haiku)/);
+        if (m1) ver = parseInt(m1[1]) * 10 + parseInt(m1[2]);
+        else if (m2) ver = parseInt(m2[1]) * 10 + parseInt(m2[2]);
+        else if (m3) ver = parseInt(m3[1]) * 10;
+        let tier = 0;
+        if (s.includes('opus')) tier = 3;
+        else if (s.includes('sonnet')) tier = 2;
+        else if (s.includes('haiku')) tier = 1;
+        return ver * 10 + tier;
+    }
+    if (provider === 'openai') {
+        if (/^o\d/.test(s)) {
+            const n = parseInt(s.match(/^o(\d+)/)[1]);
+            let tier = 20;
+            if (s.includes('pro')) tier = 30;
+            else if (s.includes('mini')) tier = 10;
+            else if (s.includes('preview')) tier = 15;
+            return 90000 + n * 100 + tier;
+        }
+        if (/gpt-4o|chatgpt-4o/.test(s)) {
+            return s.includes('mini') ? 4025 : 4050;
+        }
+        if (s.startsWith('gpt-')) {
+            const gm = s.match(/gpt-(\d+)(?:[.-](\d+))?/);
+            let score = 0;
+            if (gm) score = parseInt(gm[1]) * 1000 + (gm[2] ? parseInt(gm[2]) * 100 : 0);
+            if (s.includes('turbo')) score += 10;
+            if (s.includes('mini')) score -= 30;
+            if (s.includes('nano')) score -= 60;
+            return score;
+        }
+        if (s.startsWith('dall-e')) return 2000;
+        if (s.startsWith('tts')) return 1000;
+        if (s.startsWith('whisper')) return 900;
+        return 100;
+    }
+    if (provider === 'gemini') {
+        const gm = s.match(/gemini-(\d+)(?:[.-](\d+))?/);
+        let ver = 0;
+        if (gm) ver = parseInt(gm[1]) * 10 + (gm[2] ? parseInt(gm[2]) : 0);
+        let tier = 0;
+        if (s.includes('pro')) tier = 3;
+        else if (s.includes('flash')) tier = 2;
+        else if (s.includes('nano')) tier = 1;
+        let bonus = 0;
+        if (s.includes('thinking')) bonus += 0.5;
+        if (s.includes('latest')) bonus += 0.3;
+        return ver * 10 + tier + bonus;
+    }
+    return 0;
+}
+
 async function fetchClaude() {
     const c = getCached('claude');
     if (c) return c;
@@ -22065,7 +22123,7 @@ async function fetchClaude() {
         const result = {
             provider: 'claude',
             models: all.map(m => ({ id: m.id, name: m.display_name || m.id, created: m.created_at || '' }))
-                .sort((a, b) => (b.created || '').localeCompare(a.created || '')),
+                .sort((a, b) => modelRank('claude', b.id) - modelRank('claude', a.id)),
             fetched_at: new Date().toISOString()
         };
         setCache('claude', result);
@@ -22088,7 +22146,7 @@ async function fetchOpenAI() {
         const result = {
             provider: 'openai',
             models: (data.data || []).map(m => ({ id: m.id, owned_by: m.owned_by || '', created: m.created || 0 }))
-                .sort((a, b) => (b.created || 0) - (a.created || 0)),
+                .sort((a, b) => modelRank('openai', b.id) - modelRank('openai', a.id)),
             fetched_at: new Date().toISOString()
         };
         setCache('openai', result);
@@ -22116,7 +22174,7 @@ async function fetchGemini() {
                 description: m.description || '',
                 inputTokenLimit: m.inputTokenLimit || 0,
                 outputTokenLimit: m.outputTokenLimit || 0
-            })),
+            })).sort((a, b) => modelRank('gemini', b.id) - modelRank('gemini', a.id)),
             fetched_at: new Date().toISOString()
         };
         setCache('gemini', result);
@@ -22232,14 +22290,14 @@ h+='<div class="provider-badge">'+cnt+' 个模型</div></div>';
 if(pd&&pd.error){h+='<div class="error-msg">'+esc(pd.error)+'</div>';}
 else if(cnt>0){
 h+='<table><thead><tr><th>#</th><th>模型 ID</th>';
-if(key==='claude')h+='<th>名称</th><th>创建时间</th>';
-else if(key==='openai')h+='<th>Owner</th><th>创建时间</th>';
+if(key==='claude')h+='<th>名称</th>';
+else if(key==='openai')h+='<th>Owner</th>';
 else h+='<th>名称</th><th>说明</th>';
 h+='</tr></thead><tbody>';
 for(var i=0;i<pd.models.length;i++){var m=pd.models[i];
 h+='<tr><td class="num-col">'+(i+1)+'</td><td><span class="model-id">'+esc(m.id)+'</span></td>';
-if(key==='claude'){h+='<td class="desc">'+esc(m.name||'')+'</td><td class="desc">'+(m.created?new Date(m.created).toLocaleDateString('zh-CN'):'')+'</td>';}
-else if(key==='openai'){h+='<td class="desc">'+esc(m.owned_by||'')+'</td><td class="desc">'+(m.created?new Date(m.created*1000).toLocaleDateString('zh-CN'):'')+'</td>';}
+if(key==='claude'){var nm=m.name&&m.name!==m.id?m.name:'';h+='<td class="desc">'+esc(nm)+'</td>';}
+else if(key==='openai'){h+='<td class="desc">'+esc(m.owned_by||'')+'</td>';}
 else{h+='<td class="desc">'+esc(m.displayName||'')+'</td><td class="desc">'+esc((m.description||'').slice(0,60))+'</td>';}
 h+='</tr>';}
 h+='</tbody></table>';
