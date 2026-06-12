@@ -8,14 +8,14 @@
 # 1. 正式版本迭代时修改 SCRIPT_VERSION，并更新版本备注（保留最新5条）
 # 2. 临时热修/不发版时只修改 SCRIPT_LAST_UPDATE，用于快速识别脚本是否已更新
 #=============================================================================
+# v5.1.5 更新: Snell v6 输出的客户端节点行补上 reuse=true，与 v5 保持一致（TCP 连接复用，刷网页更跟手）(by Eric86777)
 # v5.1.4 更新: Snell v6 自检前主动装齐标准源运行库 libc-ares2+libuv1（避免逐个自检"打地鼠"），reactive 处理器补 libuv.so.1 兜底 (by Eric86777)
 # v5.1.3 更新: Snell v6 的 libssl1.1 兼容包改为官方源+snapshot 永久存档双源、双架构强制 SHA256 校验、装后确认 libcrypto.so.1.1，彻底解决点版本升级后链接 404 (by Eric86777)
 # v5.1.2 更新: Snell v6 二进制自检改用 ldd 检测缺库（零执行/不卡死/一次列全），--help 探测加 timeout 兜底，去掉会误判的「No such file」匹配 (by Eric86777)
 # v5.1.1 更新: Snell v6 安装增加二进制运行自检；缺运行库时自动/提示安装测试兼容依赖，并清理失败残留端口 (by Eric86777)
-# v5.1.0 更新: Snell 菜单新增「12-8 v6 Beta 测试专区」：独立二进制/服务/配置/保留端口，与 v5 完全隔离，含装/卸/查/更新+修复/健康检查 (by Eric86777)
 
-SCRIPT_VERSION="5.1.4"
-SCRIPT_LAST_UPDATE="Snell v6 自检前装齐 libc-ares2+libuv1，reactive 补 libuv 兜底，消除依赖打地鼠"
+SCRIPT_VERSION="5.1.5"
+SCRIPT_LAST_UPDATE="Snell v6 节点行补 reuse=true 与 v5 一致"
 #=============================================================================
 
 #=============================================================================
@@ -9757,7 +9757,7 @@ show_snellv6_config_live() {
         host_ip_formatted="[${host_ip}]"
     fi
 
-    final_config="${node_name} = snell, ${host_ip_formatted}, ${port}, psk=${psk}, version=6${ip_version_str}"
+    final_config="${node_name} = snell, ${host_ip_formatted}, ${port}, psk=${psk}, version=6, reuse=true${ip_version_str}"
     echo -e "${SNELL_CYAN}${final_config}${SNELL_RESET}"
 
     if [ "$host_ip" != "<请手动填写公网IP>" ]; then
@@ -10032,7 +10032,7 @@ EOF
         host_ip_formatted="[${host_ip}]"
     fi
 
-    local final_config="${node_name} = snell, ${host_ip_formatted}, ${snellv6_port}, psk=${random_psk}, version=6${ip_version_str}"
+    local final_config="${node_name} = snell, ${host_ip_formatted}, ${snellv6_port}, psk=${random_psk}, version=6, reuse=true${ip_version_str}"
     echo ""
     echo -e "${SNELL_GREEN}节点信息输出（Surge 客户端需 v6 Beta 渠道）：${SNELL_RESET}"
     echo -e "${SNELL_CYAN}${final_config}${SNELL_RESET}"
