@@ -8,6 +8,8 @@
 # 1. 正式版本迭代时修改 SCRIPT_VERSION，并更新版本备注（保留最新5条）
 # 2. 临时热修/不发版时只修改 SCRIPT_LAST_UPDATE，用于快速识别脚本是否已更新
 #=============================================================================
+# v5.4.4 更新: 菜单33主列表新增「重置日」「备注」两列(响应 issue #22)——有 reset_day 显示"每月X日"、无则显示"不重置"，
+#   备注为空显示"-"；同时修复到期日为空串时显示空白的问题(jq 的 // 不覆盖空串，导致永久端口到期日列一直是空白，现统一显示"永久") (by Eric86777)
 # v5.4.3 更新: 菜单33修复7项问题——①新增开机自动恢复(ptm-boot-restore.sh+systemd服务+流量快照)，
 #   重启后自动重建nftables计数/配额/tc限速并重新封锁到期端口(此前重启即失效)；②每日检查新增配额80%/95%阈值邮件通知(此前完全缺失)；
 #   ③新增到期前3天预警(此前完全缺失)；④超期≥3天端口改为cron自动完整清理并回收(此前仅记日志不清理)；
@@ -20,10 +22,9 @@
 #   修正计费模式选项编号(2=仅出站 3=CN Premium，此前编号反了)；带宽/配额/租期管理改为按序号多选端口 (by Eric86777)
 # v5.4.1 更新: 菜单33「端口流量计费与到期管理」菜单结构改为对齐 dog 原版分组(1添加/删除 2限制设置[带宽/配额/租期] 3重置管理[重置日/立即重置] 4通知 5诊断 99卸载)；修复主菜单0端口时状态栏"守护端口"数字重复显示的问题 (by Eric86777)
 # v5.4.0 更新: 精简 AI 代理工具箱(移除 Antigravity/OpenClaw/CLIProxyAPI/Codex Console/OAI2 共5个模块)；新增菜单33「端口流量计费与到期管理」(nftables计数/配额+tc限速+到期自动停机+可选Resend邮件通知) (by Eric86777)
-# v5.3.0 更新: Snell 主菜单(菜单12)进入时自动检查 v5/v6 有无新版本（每天联网一次+缓存秒回+并行探测+失败静默），结果显示在菜单顶部；v6 专区手动「检查更新」改为强制刷新 (by Eric86777)
 
-SCRIPT_VERSION="5.4.3"
-SCRIPT_LAST_UPDATE="菜单33修复7项问题；Sub2API自定义端口显示恒为8282/改端口静默失效修复"
+SCRIPT_VERSION="5.4.4"
+SCRIPT_LAST_UPDATE="菜单33主列表新增重置日/备注两列；修复永久端口到期日列显示空白"
 #=============================================================================
 
 #=============================================================================
@@ -24682,16 +24683,22 @@ ptm_render_port_table() {
         echo -e "${gl_huang}暂无监控端口${gl_bai}"
         return
     fi
-    printf "%-20s %-10s %-10s %-16s %-18s %s\n" "端口" "计费模式" "状态" "已用流量" "配额" "到期日"
+    printf "%-20s %-10s %-10s %-16s %-18s %-14s %-12s %s\n" "端口" "计费模式" "状态" "已用流量" "配额" "重置日" "到期日" "备注"
     local port
     for port in $ports; do
-        local billing_mode quota_limit expire_date status usage
+        local billing_mode quota_limit expire_date status usage reset_day remark
         billing_mode=$(jq -r ".ports.\"$port\".billing_mode // \"double\"" "$PTM_CONFIG_FILE")
         quota_limit=$(jq -r ".ports.\"$port\".quota.monthly_limit // \"unlimited\"" "$PTM_CONFIG_FILE")
-        expire_date=$(jq -r ".ports.\"$port\".expiration_date // \"永久\"" "$PTM_CONFIG_FILE")
+        # jq 的 // 只覆盖 null/缺失，不覆盖空串；而开通/清除租期写入的是 ""，需 bash 侧判空才能显示"永久"
+        expire_date=$(jq -r ".ports.\"$port\".expiration_date // \"\"" "$PTM_CONFIG_FILE")
+        [ -z "$expire_date" ] && expire_date="永久"
+        reset_day=$(jq -r ".ports.\"$port\".quota.reset_day // \"\"" "$PTM_CONFIG_FILE")
+        [ -n "$reset_day" ] && reset_day="每月${reset_day}日" || reset_day="不重置"
+        remark=$(jq -r ".ports.\"$port\".remark // \"\"" "$PTM_CONFIG_FILE")
+        [ -z "$remark" ] && remark="-"
         status=$(ptm_format_running_status "$(ptm_get_port_running_status "$port")")
         usage=$(ptm_format_bytes "$(ptm_get_port_monthly_usage "$port")")
-        printf "%-20s %-10s %-10s %-16s %-18s %s\n" "$port" "$billing_mode" "$status" "$usage" "$quota_limit" "$expire_date"
+        printf "%-20s %-10s %-10s %-16s %-18s %-14s %-12s %s\n" "$port" "$billing_mode" "$status" "$usage" "$quota_limit" "$reset_day" "$expire_date" "$remark"
     done
 }
 
