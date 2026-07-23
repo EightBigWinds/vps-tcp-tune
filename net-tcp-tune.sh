@@ -22384,11 +22384,23 @@ resp_proxy_iupstream() {
         sed 's/.*"upstream_url"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//'
 }
 
-# 读取实例 API Key
+# 读取实例 API Key（上游密钥）
 resp_proxy_ikey() {
     local cfg; cfg=$(resp_proxy_icfg "$1")
     [ -f "$cfg" ] && grep -o '"api_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$cfg" | \
         sed 's/.*"api_key"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//'
+}
+
+# 读取实例访问密钥（客户端调用代理时需携带的 Bearer token）
+resp_proxy_ipkey() {
+    local cfg; cfg=$(resp_proxy_icfg "$1")
+    [ -f "$cfg" ] && grep -o '"proxy_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$cfg" | \
+        sed 's/.*"proxy_key"[[:space:]]*:[[:space:]]*"//' | sed 's/"$//'
+}
+
+# 生成一个新的访问密钥
+resp_proxy_gen_pkey() {
+    LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48
 }
 
 # 自动分配空闲端口
@@ -22414,6 +22426,7 @@ resp_proxy_write_script() {
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { URL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22421,7 +22434,24 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = join(__dirname, 'config.json');
 const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-const { upstream_url, api_key, port } = config;
+const { upstream_url, api_key, port, proxy_key } = config;
+
+// 常数时间比较，避免时序侧信道泄露密钥
+function timingSafeCompare(a, b) {
+    const bufA = Buffer.from(String(a));
+    const bufB = Buffer.from(String(b));
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// 校验调用方是否携带了正确的访问密钥；未配置密钥时一律拒绝（失败关闭）
+function isAuthorized(req) {
+    if (!proxy_key) return false;
+    const authHeader = req.headers['authorization'] || '';
+    const m = /^Bearer\s+(.+)$/.exec(authHeader);
+    if (!m) return false;
+    return timingSafeCompare(m[1], proxy_key);
+}
 
 function forwardRequest(upstreamUrl, reqData, authHeader) {
     return new Promise((resolve, reject) => {
@@ -22487,10 +22517,15 @@ function parseUpstreamResponse(body) {
 }
 
 const server = http.createServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    if (!isAuthorized(req)) {
+        res.writeHead(401, {'Content-Type': 'application/json'});
+        res.end(JSON.stringify({ error: { message: 'Unauthorized: missing or invalid Bearer token', type: 'invalid_request_error' } }));
+        return;
+    }
 
     if (req.url === '/v1/models' && req.method === 'GET') {
         res.writeHead(200, {'Content-Type': 'application/json'});
@@ -22669,12 +22704,15 @@ resp_proxy_deploy() {
     read -e -p "代理监听端口 [${suggested_port}]: " proxy_port
     proxy_port="${proxy_port:-$suggested_port}"
 
+    local proxy_key; proxy_key=$(resp_proxy_gen_pkey)
+
     mkdir -p "$idir"
     cat > "$cfg" << CONFIGEOF
 {
     "upstream_url": "${upstream_url}",
     "api_key": "${api_key}",
-    "port": ${proxy_port}
+    "port": ${proxy_port},
+    "proxy_key": "${proxy_key}"
 }
 CONFIGEOF
 
@@ -22709,7 +22747,8 @@ SVCEOF
         echo -e "${gl_lv}✅ 实例 [${name}] 部署成功！${gl_bai}"
         echo ""
         echo -e "代理地址: ${gl_huang}http://${server_ip}:${proxy_port}/v1/chat/completions${gl_bai}"
-        echo -e "API Key:  ${gl_zi}${api_key}${gl_bai}"
+        echo -e "访问密钥: ${gl_zi}${proxy_key}${gl_bai}"
+        echo -e "${gl_hui}客户端需在请求头携带 Authorization: Bearer ${proxy_key}${gl_bai}"
         echo -e "模型:     ${gl_zi}按上游支持的填写 (如 gpt-5.3-codex / o3)${gl_bai}"
     else
         echo -e "${gl_hong}❌ 启动失败：journalctl -u ${svc} -n 20${gl_bai}"
@@ -22720,7 +22759,8 @@ SVCEOF
 # ── 修改实例配置 ───────────────────────────────────────────────────────────────
 resp_proxy_config() {
     local name="$1"
-    local cfg svc; cfg=$(resp_proxy_icfg "$name"); svc=$(resp_proxy_isvc "$name")
+    local cfg svc script; cfg=$(resp_proxy_icfg "$name"); svc=$(resp_proxy_isvc "$name")
+    script=$(resp_proxy_iscript "$name")
     clear
     echo -e "${gl_kjlan}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${gl_bai}"
     echo -e "${gl_kjlan}  修改配置: ${gl_huang}${name}${gl_bai}"
@@ -22734,10 +22774,13 @@ resp_proxy_config() {
     read -e -p "上游服务地址: " new_upstream; new_upstream="${new_upstream%/}"
     read -e -p "API Key: " new_key
     read -e -p "代理监听端口 [$(resp_proxy_iport "$name")]: " new_port
-    local final_upstream final_key final_port
+    local final_upstream final_key final_port final_pkey
     final_upstream="${new_upstream:-$(resp_proxy_iupstream "$name")}"
     final_key="${new_key:-$(resp_proxy_ikey "$name")}"
     final_port="${new_port:-$(resp_proxy_iport "$name")}"
+    # 保留已有访问密钥；若实例是本次修复前部署的旧实例（没有访问密钥），现在补发一个
+    final_pkey="$(resp_proxy_ipkey "$name")"
+    [ -z "$final_pkey" ] && final_pkey="$(resp_proxy_gen_pkey)"
     if [ -z "$final_upstream" ] || [ -z "$final_key" ]; then
         echo -e "${gl_hong}❌ 上游地址和 API Key 不能为空${gl_bai}"; break_end; return 1
     fi
@@ -22745,17 +22788,30 @@ resp_proxy_config() {
 {
     "upstream_url": "${final_upstream}",
     "api_key": "${final_key}",
-    "port": ${final_port}
+    "port": ${final_port},
+    "proxy_key": "${final_pkey}"
 }
 CONFIGEOF
+    # 同步重写 proxy.mjs：旧实例的运行进程此前从未校验访问密钥，
+    # 仅更新 config.json 不会让正在运行的服务变得可鉴权，必须一并重新生成脚本
+    resp_proxy_write_script "$script"
     echo ""
     echo -e "${gl_lv}✅ 配置已更新${gl_bai}"
+    echo -e "访问密钥: ${gl_zi}${final_pkey}${gl_bai}"
+    echo -e "${gl_hui}客户端需在请求头携带 Authorization: Bearer ${final_pkey}（服务重启后生效）${gl_bai}"
     echo ""
     read -e -p "是否重启服务使配置生效？(Y/N): " confirm
     case "$confirm" in
         [Yy])
             systemctl restart "$svc" 2>/dev/null; sleep 2
-            systemctl is-active "$svc" &>/dev/null && echo -e "${gl_lv}✅ 已重启${gl_bai}" || echo -e "${gl_hong}❌ 重启失败${gl_bai}"
+            if systemctl is-active "$svc" &>/dev/null; then
+                echo -e "${gl_lv}✅ 已重启，访问密钥已生效${gl_bai}"
+            else
+                echo -e "${gl_hong}❌ 重启失败${gl_bai}"
+            fi
+            ;;
+        *)
+            echo -e "${gl_huang}⚠ 未重启，服务仍在运行旧代码，访问密钥尚未生效${gl_bai}"
             ;;
     esac
     break_end
@@ -22775,7 +22831,7 @@ resp_proxy_status() {
     if [ -f "$(resp_proxy_icfg "$name")" ]; then
         local port upstream key server_ip
         port=$(resp_proxy_iport "$name"); upstream=$(resp_proxy_iupstream "$name")
-        key=$(resp_proxy_ikey "$name")
+        key=$(resp_proxy_ipkey "$name")
         server_ip=$(curl -s4 --max-time 3 ifconfig.me 2>/dev/null || echo "你的IP")
         echo -e "${gl_kjlan}沉浸式翻译配置:${gl_bai}"
         echo -e "  API URL: ${gl_huang}http://${server_ip}:${port}/v1/chat/completions${gl_bai}"
