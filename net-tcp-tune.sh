@@ -22707,6 +22707,8 @@ resp_proxy_deploy() {
     local proxy_key; proxy_key=$(resp_proxy_gen_pkey)
 
     mkdir -p "$idir"
+    # 安全：目录先收紧到仅 root 可进，再写入含密钥的配置
+    chmod 700 "$idir"
     cat > "$cfg" << CONFIGEOF
 {
     "upstream_url": "${upstream_url}",
@@ -22715,6 +22717,7 @@ resp_proxy_deploy() {
     "proxy_key": "${proxy_key}"
 }
 CONFIGEOF
+    chmod 600 "$cfg"
 
     resp_proxy_write_script "$script"
 
@@ -22784,6 +22787,8 @@ resp_proxy_config() {
     if [ -z "$final_upstream" ] || [ -z "$final_key" ]; then
         echo -e "${gl_hong}❌ 上游地址和 API Key 不能为空${gl_bai}"; break_end; return 1
     fi
+    # 安全：旧实例(修复前部署)目录是默认 755，写入前一并收紧
+    chmod 700 "$(resp_proxy_idir "$name")"
     cat > "$cfg" << CONFIGEOF
 {
     "upstream_url": "${final_upstream}",
@@ -22792,6 +22797,7 @@ resp_proxy_config() {
     "proxy_key": "${final_pkey}"
 }
 CONFIGEOF
+    chmod 600 "$cfg"
     # 同步重写 proxy.mjs：旧实例的运行进程此前从未校验访问密钥，
     # 仅更新 config.json 不会让正在运行的服务变得可鉴权，必须一并重新生成脚本
     resp_proxy_write_script "$script"
